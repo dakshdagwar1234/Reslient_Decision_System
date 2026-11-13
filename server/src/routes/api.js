@@ -41,3 +41,4 @@ router.post('/configs', createConfig);
 router.patch('/configs/:id/activate', activateConfig);
 
 module.exports = router;
+

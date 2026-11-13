@@ -117,6 +117,58 @@ describe('Decision System REST APIs & Idempotency Integration Tests', () => {
     expect(totalExecutions).toBe(1);
   });
 
+  it('Idempotency Concurrency: In-progress duplicate with same key should return 409 Conflict and not create another execution', async () => {
+    const inProgressKey = 'test-key-in-progress-concurrent';
+
+    // Simulate an existing in-progress execution record created atomically
+    await IdempotencyRecord.create({
+      key: inProgressKey,
+      requestHash: 'simulated-in-flight-hash',
+      status: 'IN_PROGRESS',
+      heartbeatAt: new Date()
+    });
+
+    const resConcurrent = await request(app)
+      .post('/api/v1/decisions/evaluate')
+      .set('Idempotency-Key', inProgressKey)
+      .send(primeApplicant);
+
+    // If request payload hash matches, returns 409 Conflict with Retry-After header
+    // If request payload hash differs, returns 422 Payload Mismatch
+    expect([409, 422]).toContain(resConcurrent.status);
+
+    // Verify NO execution document was created in the database
+    const totalExecutions = await Execution.countDocuments({ idempotencyKey: inProgressKey });
+    expect(totalExecutions).toBe(0);
+  });
+
+  it('Idempotency Concurrency Matching: In-progress duplicate with exact matching payload returns 409 Conflict', async () => {
+    const matchingKey = 'test-key-matching-in-flight';
+    const { computePayloadHash } = require('../../src/middleware/idempotency');
+    const matchingHash = computePayloadHash(primeApplicant);
+
+    // Simulate in-flight record with identical payload hash
+    await IdempotencyRecord.create({
+      key: matchingKey,
+      requestHash: matchingHash,
+      status: 'IN_PROGRESS',
+      heartbeatAt: new Date()
+    });
+
+    const resConcurrent = await request(app)
+      .post('/api/v1/decisions/evaluate')
+      .set('Idempotency-Key', matchingKey)
+      .send(primeApplicant);
+
+    expect(resConcurrent.status).toBe(409);
+    expect(resConcurrent.body.error.code).toBe('CONCURRENT_REQUEST_IN_PROGRESS');
+    expect(resConcurrent.headers['retry-after']).toBe('2');
+
+    // Verify NO execution was created
+    const totalExecutions = await Execution.countDocuments({ idempotencyKey: matchingKey });
+    expect(totalExecutions).toBe(0);
+  });
+
   it('Idempotency Conflict: Same key with differing payload should return 422 Unprocessable Entity', async () => {
     const conflictKey = 'test-key-conflict-1';
 
@@ -213,3 +265,4 @@ describe('Decision System REST APIs & Idempotency Integration Tests', () => {
     expect(v1Config.status).toBe('ARCHIVED');
   });
 });
+

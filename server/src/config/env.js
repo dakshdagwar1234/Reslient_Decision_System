@@ -5,6 +5,8 @@ const dotenv = require('dotenv');
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
+const isTest = process.env.NODE_ENV === 'test';
+
 const env = {
   NODE_ENV: process.env.NODE_ENV || 'development',
   PORT: parseInt(process.env.PORT, 10) || 5000,
@@ -12,9 +14,10 @@ const env = {
   CLIENT_ORIGIN: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
 
   // Simulated Chaos for External Services
-  SIMULATE_TIMEOUT_RATE: parseFloat(process.env.SIMULATE_TIMEOUT_RATE) || 0.0,
-  SIMULATE_5XX_RATE: parseFloat(process.env.SIMULATE_5XX_RATE) || 0.0,
-  EXTERNAL_LATENCY_MS: parseInt(process.env.EXTERNAL_LATENCY_MS, 10) || 200,
+  // In automated tests, chaos defaults to 0 so tests remain deterministic unless explicitly overridden via chaosOverrides
+  SIMULATE_TIMEOUT_RATE: isTest ? 0.0 : (parseFloat(process.env.SIMULATE_TIMEOUT_RATE) || 0.0),
+  SIMULATE_5XX_RATE: isTest ? 0.0 : (parseFloat(process.env.SIMULATE_5XX_RATE) || 0.0),
+  EXTERNAL_LATENCY_MS: isTest ? 0 : (parseInt(process.env.EXTERNAL_LATENCY_MS, 10) || 200),
   CIRCUIT_BREAKER_TIMEOUT_MS: parseInt(process.env.CIRCUIT_BREAKER_TIMEOUT_MS, 10) || 3000,
 
   // Retry Mechanics
@@ -28,4 +31,3 @@ const env = {
 };
 
 module.exports = env;
-

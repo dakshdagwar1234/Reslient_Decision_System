@@ -39,6 +39,8 @@ const idempotencyMiddleware = async (req, res, next) => {
   try {
     // 1. Attempt atomic creation of in-flight record
     let record;
+    let isOriginalRequest = false;
+
     try {
       record = await IdempotencyRecord.create({
         key: cleanKey,
@@ -46,10 +48,12 @@ const idempotencyMiddleware = async (req, res, next) => {
         status: 'IN_PROGRESS',
         heartbeatAt: new Date()
       });
+      isOriginalRequest = true;
     } catch (createErr) {
-      // Duplicate key error (code 11000) -> Record already exists
+      // Duplicate key error (code 11000) -> Record already exists; this is a duplicate or concurrent request
       if (createErr.code === 11000) {
         record = await IdempotencyRecord.findOne({ key: cleanKey });
+        isOriginalRequest = false;
       } else {
         throw createErr;
       }
@@ -59,60 +63,63 @@ const idempotencyMiddleware = async (req, res, next) => {
       record = await IdempotencyRecord.findOne({ key: cleanKey });
     }
 
-    // 2. Payload Conflict Check
-    if (record.requestHash !== currentHash) {
-      return res.status(422).json({
-        error: {
-          code: 'IDEMPOTENCY_PAYLOAD_MISMATCH',
-          message: 'An existing idempotency record was found for this key with a different request payload.',
-          idempotencyKey: cleanKey,
-          timestamp: new Date().toISOString()
-        }
-      });
-    }
-
-    // 3. Completed Record -> Return Cached Response Snapshot Immediately
-    if (record.status === 'COMPLETED') {
-      res.set('X-Cache-Lookup', 'HIT');
-      res.set('X-Idempotent-Replay', 'true');
-      return res.status(record.responseStatus || 200).json(record.responseBody);
-    }
-
-    // 4. In-Progress Check: Concurrency or Stale Recovery
-    const isNewRecord = record.createdAt && (Date.now() - new Date(record.createdAt).getTime() < 1000);
-    if (record.status === 'IN_PROGRESS' && !isNewRecord) {
-      const staleThresholdMs = (env.IN_PROGRESS_TIMEOUT_SECONDS || 60) * 1000;
-      const timeSinceHeartbeat = Date.now() - new Date(record.heartbeatAt || record.createdAt).getTime();
-
-      if (timeSinceHeartbeat > staleThresholdMs) {
-        // Interrupted execution recovery: Previous server worker crashed or stalled.
-        console.warn(`[Idempotency] Reclaiming stale in-progress key '${cleanKey}' (idle for ${timeSinceHeartbeat}ms)`);
-        record.heartbeatAt = new Date();
-        await record.save();
-      } else {
-        // Concurrency lock: Currently processing
-        res.set('Retry-After', '2');
-        return res.status(409).json({
+    // 2. If not the original request, enforce conflict, completed replay, or concurrency locking
+    if (!isOriginalRequest && record) {
+      // A. Payload Conflict Check
+      if (record.requestHash !== currentHash) {
+        return res.status(422).json({
           error: {
-            code: 'CONCURRENT_REQUEST_IN_PROGRESS',
-            message: 'A request with this idempotency key is currently being processed. Please retry shortly.',
+            code: 'IDEMPOTENCY_PAYLOAD_MISMATCH',
+            message: 'An existing idempotency record was found for this key with a different request payload.',
             idempotencyKey: cleanKey,
-            retryAfterSeconds: 2,
             timestamp: new Date().toISOString()
           }
         });
       }
+
+      // B. Completed Record -> Return Cached Response Snapshot Immediately
+      if (record.status === 'COMPLETED') {
+        res.set('X-Cache-Lookup', 'HIT');
+        res.set('X-Idempotent-Replay', 'true');
+        return res.status(record.responseStatus || 200).json(record.responseBody);
+      }
+
+      // C. In-Progress Record -> Check for Stale/Crashed Worker Recovery or Reject Concurrent Call
+      if (record.status === 'IN_PROGRESS') {
+        const staleThresholdMs = (env.IN_PROGRESS_TIMEOUT_SECONDS || 60) * 1000;
+        const timeSinceHeartbeat = Date.now() - new Date(record.heartbeatAt || record.createdAt).getTime();
+
+        if (timeSinceHeartbeat > staleThresholdMs) {
+          // Reclaim stale lock from a crashed process
+          console.warn(`[Idempotency] Reclaiming stale in-progress key '${cleanKey}' (idle for ${timeSinceHeartbeat}ms)`);
+          record.heartbeatAt = new Date();
+          await record.save();
+        } else {
+          // Concurrency lock: Currently processing by active worker
+          res.set('Retry-After', '2');
+          return res.status(409).json({
+            error: {
+              code: 'CONCURRENT_REQUEST_IN_PROGRESS',
+              message: 'A request with this idempotency key is currently being processed. Please retry shortly.',
+              idempotencyKey: cleanKey,
+              retryAfterSeconds: 2,
+              timestamp: new Date().toISOString()
+            }
+          });
+        }
+      }
     }
 
-    // 5. Intercept response to snapshot upon completion
+    // 3. Attach metadata to request
     req.idempotencyRecord = record;
     req.idempotencyKey = cleanKey;
 
+    // 4. Wrap res.json as fallback snapshot writer if not already explicitly written by controller
     const originalJson = res.json.bind(res);
     res.json = (body) => {
-      // Asynchronously update the idempotency record with completed status and response body
+      // Background safety net update if still in progress
       IdempotencyRecord.updateOne(
-        { key: cleanKey },
+        { key: cleanKey, status: 'IN_PROGRESS' },
         {
           $set: {
             status: 'COMPLETED',
@@ -122,7 +129,7 @@ const idempotencyMiddleware = async (req, res, next) => {
           }
         }
       ).catch(updateErr => {
-        console.error(`[Idempotency] Failed to finalize record for key '${cleanKey}':`, updateErr.message);
+        console.error(`[Idempotency] Notice during fallback finalize for '${cleanKey}':`, updateErr.message);
       });
 
       return originalJson(body);

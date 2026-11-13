@@ -89,3 +89,4 @@ export async function activateConfig(id) {
   if (!res.ok) throw new Error(data.error?.message || 'Config activation failed');
   return data;
 }
+

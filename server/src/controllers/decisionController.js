@@ -1,5 +1,6 @@
 const Execution = require('../models/Execution');
 const WorkflowConfig = require('../models/WorkflowConfig');
+const IdempotencyRecord = require('../models/IdempotencyRecord');
 const WorkflowRunner = require('../engine/WorkflowRunner');
 const { computePayloadHash } = require('../middleware/idempotency');
 
@@ -56,7 +57,7 @@ const evaluateDecision = async (req, res, next) => {
 
     const responseStatus = completedExecution.executionState === 'AWAITING_RETRY' ? 202 : 200;
 
-    return res.status(responseStatus).json({
+    const responsePayload = {
       executionId: completedExecution._id,
       workflowVersion: completedExecution.workflowVersion,
       executionState: completedExecution.executionState,
@@ -67,8 +68,30 @@ const evaluateDecision = async (req, res, next) => {
       manualReview: completedExecution.manualReview,
       createdAt: completedExecution.createdAt,
       updatedAt: completedExecution.updatedAt
-    });
+    };
+
+    // Explicitly persist completed snapshot to IdempotencyRecord before sending HTTP response
+    if (idempotencyKey) {
+      await IdempotencyRecord.updateOne(
+        { key: idempotencyKey },
+        {
+          $set: {
+            status: 'COMPLETED',
+            responseStatus,
+            responseBody: responsePayload,
+            executionId: completedExecution._id,
+            heartbeatAt: new Date()
+          }
+        }
+      );
+    }
+
+    return res.status(responseStatus).json(responsePayload);
   } catch (error) {
+    if (req.idempotencyKey) {
+      // Clean up in-progress lock on fatal error
+      await IdempotencyRecord.deleteOne({ key: req.idempotencyKey, status: 'IN_PROGRESS' }).catch(() => {});
+    }
     next(error);
   }
 };
@@ -187,3 +210,4 @@ module.exports = {
   listDecisions,
   retryDecision
 };
+

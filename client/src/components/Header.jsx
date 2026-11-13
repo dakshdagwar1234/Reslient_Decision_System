@@ -71,3 +71,4 @@ export default function Header({ activeTab, setActiveTab, onRefresh, isRefreshin
     </header>
   );
 }
+

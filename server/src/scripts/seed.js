@@ -186,3 +186,4 @@ module.exports = {
   DEFAULT_LOAN_WORKFLOW,
   seedDefaultWorkflow
 };
+
