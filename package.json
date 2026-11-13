@@ -1,0 +1,24 @@
+{
+  "name": "resilient-decision-system",
+  "version": "1.0.0",
+  "description": "Enterprise-grade resilient decision system with configurable workflow engine and loan approval reference domain",
+  "private": true,
+  "scripts": {
+    "server": "npm --prefix server start",
+    "server:dev": "npm --prefix server run dev",
+    "server:test": "npm --prefix server test",
+    "client": "npm --prefix client dev",
+    "client:build": "npm --prefix client build",
+    "test": "npm --prefix server test"
+  },
+  "keywords": [
+    "decision-engine",
+    "workflow",
+    "resilience",
+    "idempotency",
+    "state-machine"
+  ],
+  "author": "",
+  "license": "ISC"
+}
+
