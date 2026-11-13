@@ -9,8 +9,14 @@ let retryWorkerInstance = null;
 const startServer = async () => {
   console.log('[Bootstrap] Initializing Resilient Decision System server...');
 
-  // Attempt DB connection in a non-blocking manner
-  await connectDB().then(async (conn) => {
+  const server = app.listen(env.PORT, () => {
+    console.log(`[Bootstrap] Server listening on port ${env.PORT} in ${env.NODE_ENV} mode`);
+    console.log(`[Bootstrap] Health endpoint: http://localhost:${env.PORT}/health`);
+    console.log(`[Bootstrap] API v1 Base: http://localhost:${env.PORT}/api/v1`);
+  });
+
+  // Attempt DB connection in a non-blocking background task
+  connectDB().then(async (conn) => {
     if (conn) {
       await seedDefaultWorkflow();
       retryWorkerInstance = new RetryWorker();
@@ -18,12 +24,6 @@ const startServer = async () => {
     }
   }).catch(err => {
     console.warn(`[Bootstrap] Notice: Database connection attempt returned: ${err.message}. Server continues to serve health checks.`);
-  });
-
-  const server = app.listen(env.PORT, () => {
-    console.log(`[Bootstrap] Server listening on port ${env.PORT} in ${env.NODE_ENV} mode`);
-    console.log(`[Bootstrap] Health endpoint: http://localhost:${env.PORT}/health`);
-    console.log(`[Bootstrap] API v1 Base: http://localhost:${env.PORT}/api/v1`);
   });
 
   // Graceful shutdown handling
