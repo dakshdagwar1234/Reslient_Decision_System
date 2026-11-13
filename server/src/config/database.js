@@ -45,14 +45,14 @@ const connectDB = async (uri = env.MONGODB_URI) => {
 
   // Attempt 1: Connect to configured MongoDB URI (e.g. Atlas)
   try {
-    console.log(`[Database] Connecting to MongoDB (${uri.includes('mongodb+srv') ? 'MongoDB Atlas' : 'Local MongoDB'})...`);
+    connectionType = uri.includes('mongodb+srv') || uri.includes('mongodb.net') ? 'atlas' : 'local';
+    console.log(`[Database] Connecting to MongoDB (${connectionType === 'atlas' ? 'MongoDB Atlas' : 'Local MongoDB'})...`);
     const conn = await mongoose.connect(uri, {
       serverSelectionTimeoutMS: 4000,
       connectTimeoutMS: 8000,
       autoIndex: true
     });
     isConnected = true;
-    connectionType = 'atlas';
     return conn;
   } catch (error) {
     console.warn(`\n[Database] Note: Direct connection to Atlas failed: ${error.message}`);
