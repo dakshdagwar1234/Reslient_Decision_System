@@ -34,7 +34,7 @@ An enterprise-grade, deterministic, and fault-tolerant business decision system 
 
 - **Backend**: Node.js, Express, MongoDB Atlas, Mongoose
 - **Frontend**: React.js, Vite, Tailwind CSS, Lucide Icons (JavaScript only, no TypeScript)
-- **Testing**: Jest, Supertest, MongoMemoryServer (51 automated tests across 9 test suites)
+- **Testing**: Jest, Supertest, MongoMemoryServer, Puppeteer-Core (53 automated tests across 9 test suites + Real Browser E2E suite)
 
 ---
 
@@ -208,14 +208,28 @@ resilient-decision-system/
 cd server
 npm test
 ```
-*Executes all 51 unit and integration tests across 9 test suites.*
+*Executes all 53 unit and integration tests across 9 test suites.*
 
-### Run Backend
+### Run MongoDB Atlas Live Persistence Verification
+```bash
+cd server
+node scripts/verify-atlas-persistence.js
+```
+*Executes all 9 live persistence and lifecycle scenarios directly on MongoDB Atlas.*
+
+### Run Real Browser (Chrome) E2E Verification
+```bash
+cd client
+node test-e2e-browser.cjs
+```
+*Drives Chrome through all 12 frontend UI workflows, demo presets, manual review overrides, and audit modals.*
+
+### Run Backend Server
 ```bash
 cd server
 npm start
 ```
-*Server runs on `http://localhost:5000` (seeds default workflow and starts persistent retry worker).*
+*Server runs on `http://localhost:5001` (seeds default workflow and starts persistent retry worker).*
 
 ### Run Frontend Dashboard
 ```bash
@@ -226,8 +240,10 @@ npm run dev
 
 ### Full Production Build
 ```bash
-npm run client:build
-npm --prefix server start
+cd client
+npm run build
+cd ../server
+npm start
 ```
-*Express automatically serves the compiled React dashboard at `http://localhost:5000`.*
+*Express automatically serves the compiled React dashboard at `http://localhost:5001`.*
 
